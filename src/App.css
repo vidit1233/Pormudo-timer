@@ -102,19 +102,15 @@ body {
   }
 }
 
-/* ── Outer card: hardware chassis ── */
+/* ── Module card: no outer box; radius only on console perimeter (OP-1 style). ── */
 .card {
   z-index: 1;
   overflow-x: hidden;
   background: var(--chassis-inner);
-  border-radius: var(--radius-card);
   padding: 1.25rem 1.5rem 1.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.12),
-    0 8px 24px rgba(0, 0, 0, 0.35),
-    0 2px 4px rgba(0, 0, 0, 0.25);
+  /* Border-radius set per-module via inline style (perimeter corners only). */
+  border: none;
+  box-shadow: none;
 }
 
 /* ── Header ── */
@@ -324,9 +320,12 @@ body {
 /* Session # moved to task heading — no bottom-right version */
 
 /* ── Sound selector: single connected tab bank ── */
+.sound-pills-wrap {
+  margin-bottom: 1.1rem;
+}
+
 .sound-pills {
   display: flex;
-  margin-bottom: 1.1rem;
   border-radius: var(--radius-btn);
   overflow: hidden;
 
@@ -369,6 +368,20 @@ body {
   background: rgba(255, 255, 255, 0.6);
   color: var(--text);
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.sound-pills-ambient-link {
+  display: block;
+  margin-top: 0.4rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  color: var(--text-label);
+  text-decoration: none;
+}
+
+.sound-pills-ambient-link:hover {
+  color: var(--text);
+  text-decoration: underline;
 }
 
 /* ── Controls row ── */
@@ -957,16 +970,3 @@ body {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
 }
 
-.volume-knob-arc {
-  position: absolute;
-  bottom: -4px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 100px;
-  height: 24px;
-  border: 2px solid var(--chassis-rim);
-  border-top: none;
-  border-radius: 0 0 50px 50px;
-  opacity: 0.6;
-  pointer-events: none;
-}

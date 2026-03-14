@@ -4,7 +4,6 @@ import Header from './components/Header';
 import TimerBlock from './components/TimerBlock';
 import SoundPills from './components/SoundPills';
 import Controls from './components/Controls';
-import SessionDots from './components/SessionDots';
 import Todo from './components/Todo';
 import VolumeWidget from './components/VolumeWidget';
 import useBackgroundSound from './hooks/useBackgroundSound';
@@ -137,7 +136,10 @@ function App() {
 
   /** Console: union of all module rects + padding. When modules snap together, one chassis wraps them. */
   const [consoleBounds, setConsoleBounds] = useState(null);
+  /** For each module: which corners lie on the console perimeter (get rounded); inner junctions stay sharp. */
+  const [perimeterCorners, setPerimeterCorners] = useState([]);
   const CONSOLE_PADDING = 20;
+  const RADIUS_CARD = 18;
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -148,12 +150,24 @@ function App() {
       const top = Math.min(...rects.map((r) => r.top));
       const right = Math.max(...rects.map((r) => r.right));
       const bottom = Math.max(...rects.map((r) => r.bottom));
+      const cLeft = left - CONSOLE_PADDING;
+      const cTop = top - CONSOLE_PADDING;
+      const cRight = right + CONSOLE_PADDING;
+      const cBottom = bottom + CONSOLE_PADDING;
       setConsoleBounds({
-        left: left - CONSOLE_PADDING,
-        top: top - CONSOLE_PADDING,
-        width: right - left + CONSOLE_PADDING * 2,
-        height: bottom - top + CONSOLE_PADDING * 2,
+        left: cLeft,
+        top: cTop,
+        width: cRight - cLeft,
+        height: cBottom - cTop,
       });
+      const tolerance = 2;
+      const corners = rects.map((r) => ({
+        topLeft: r.top <= cTop + tolerance && r.left <= cLeft + tolerance,
+        topRight: r.top <= cTop + tolerance && r.right >= cRight - tolerance,
+        bottomLeft: r.bottom >= cBottom - tolerance && r.left <= cLeft + tolerance,
+        bottomRight: r.bottom >= cBottom - tolerance && r.right >= cRight - tolerance,
+      }));
+      setPerimeterCorners(corners);
     });
     return () => cancelAnimationFrame(raf);
   }, [cardPosition, todoPosition, volumeWidgetPosition]);
@@ -340,6 +354,18 @@ function App() {
     setTodoItems((prev) => prev.filter((item) => !(item.type === 'task' && item.completed)));
   };
 
+  /** Border radius only on corners that lie on the console perimeter; inner junctions stay sharp (OP-1 style). */
+  const getModuleCardStyle = (index) => {
+    const c = perimeterCorners[index];
+    if (!c) return {};
+    return {
+      borderTopLeftRadius: c.topLeft ? RADIUS_CARD : 0,
+      borderTopRightRadius: c.topRight ? RADIUS_CARD : 0,
+      borderBottomLeftRadius: c.bottomLeft ? RADIUS_CARD : 0,
+      borderBottomRightRadius: c.bottomRight ? RADIUS_CARD : 0,
+    };
+  };
+
   return (
     <div className="app">
       {consoleBounds && (
@@ -367,12 +393,11 @@ function App() {
           zIndex: 10,
         }}
       >
-        <div className="card">
+        <div className="card" style={getModuleCardStyle(0)}>
           <Header onDragHandleMouseDown={handleDragStart} />
           <TimerBlock
             timeLeft={formatTime(timeLeft)}
             mode={mode}
-            sessionCount={sessionCount}
           />
           <SoundPills selectedSound={selectedSound} onSelect={setSelectedSound} />
           <Controls
@@ -386,11 +411,6 @@ function App() {
             onBreakMinutesChange={(delta) => setBreakMinutes((m) => Math.max(1, Math.min(15, m + delta)))}
           />
           <div className="card-footer">
-            <SessionDots
-              completedCount={sessionCount > 0 && sessionCount % 4 === 0 ? 4 : sessionCount % 4}
-              activeIndex={isRunning && mode === 'focus' ? sessionCount % 4 : null}
-              total={4}
-            />
             <span className="card-version">PC-25</span>
           </div>
         </div>
@@ -406,7 +426,7 @@ function App() {
           zIndex: 10,
         }}
       >
-        <div className="card">
+        <div className="card" style={getModuleCardStyle(1)}>
           <Todo
             items={todoItems}
             onAddTask={handleAddTask}
@@ -429,7 +449,7 @@ function App() {
           zIndex: 10,
         }}
       >
-        <div className="card">
+        <div className="card" style={getModuleCardStyle(2)}>
           <VolumeWidget
             volume={volume}
             onVolumeChange={setVolume}

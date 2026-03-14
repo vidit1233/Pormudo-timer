@@ -1,11 +1,10 @@
-function TimerBlock({ timeLeft = '15:00', mode = 'focus', sessionCount = 0 }) {
+function TimerBlock({ timeLeft = '15:00', mode = 'focus' }) {
   return (
     <div className="timer-block">
       <div className="timer-block-scanlines" aria-hidden="true" />
       <div className="timer-task-section">
         <div className="timer-task-heading">
           <p className="timer-task-prompt">What are you working on?</p>
-          <span className="timer-session-count">#{sessionCount}</span>
         </div>
         <p className="timer-task-tags">track · task · intention</p>
       </div>

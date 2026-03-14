@@ -1,8 +1,8 @@
 import { useRef, useCallback } from 'react';
 
 const NUM_STEPS = 28;
-const MIN_ANGLE = -135;
-const MAX_ANGLE = 135;
+const MIN_ANGLE = -90;
+const MAX_ANGLE = 90;
 const PIXELS_PER_STEP = 10;
 
 function playTickSound(ctxRef) {
@@ -118,7 +118,6 @@ function VolumeWidget({ volume, onVolumeChange, onDragHandleMouseDown }) {
         />
         <span className="volume-knob-label volume-knob-label-high" aria-hidden>+</span>
       </div>
-      <div className="volume-knob-arc" aria-hidden />
     </div>
   );
 }
