@@ -1,8 +1,9 @@
 :root {
-  /* --- Hardware chassis palette --- */
-  --chassis:        #cdc8c0;
-  --chassis-inner:  #d8d3cc;
-  --chassis-rim:    #b0aba4;
+  /* --- Hardware chassis palette (OP-1 style frame + panels) --- */
+  --chassis:        #e0ddd8;   /* Light grey outer frame */
+  --chassis-inner:  #eae6e1;   /* Slightly warmer off-white panel background */
+  --chassis-rim:    #b8b4ae;   /* Darker rim for frame edge */
+  --panel-groove:   rgba(0, 0, 0, 0.12);  /* Recessed line between panels */
 
   /* Button surfaces */
   --btn-top:        #d2cdc6;
@@ -42,6 +43,12 @@
 
 * { box-sizing: border-box; }
 
+html {
+  background: #161412;
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
 html, body {
   overflow-x: hidden;
   max-width: 100%;
@@ -50,7 +57,7 @@ html, body {
 body {
   margin: 0;
   min-height: 100vh;
-  background: #b8b3ac;
+  background: radial-gradient(ellipse 120% 90% at 50% 30%, #1e1b18 0%, #161412 75%);
   font-family: var(--font-mono);
   width: 380px;
   min-width: 380px;
@@ -75,16 +82,17 @@ body {
   max-width: 380px;
 }
 
-/* ── Console chassis: unified surface when modules snap together ── */
+/* ── Console chassis: single frame wrapping all panels (OP-1 style) ── */
 .console-chassis {
   pointer-events: none;
   background: var(--chassis);
-  border-radius: 22px;
-  border: 1px solid var(--chassis-rim);
+  border-radius: 24px;
+  border: 2px solid var(--chassis-rim);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.4),
-    0 12px 32px rgba(0, 0, 0, 0.3),
-    0 4px 8px rgba(0, 0, 0, 0.2);
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.08),
+    0 6px 20px rgba(0, 0, 0, 0.4),
+    0 16px 48px rgba(0, 0, 0, 0.35);
   transition: box-shadow 0.15s ease;
 }
 
@@ -92,6 +100,7 @@ body {
   body {
     width: auto;
     min-width: 0;
+    background: radial-gradient(ellipse 110% 100% at 50% 30%, #1e1b18 0%, #161412 70%);
   }
   .app,
   .card-wrapper {
@@ -102,15 +111,14 @@ body {
   }
 }
 
-/* ── Module card: no outer box; radius only on console perimeter (OP-1 style). ── */
+/* ── Module card: panel background only. Black groove between panels added inline when snapped. ── */
 .card {
   z-index: 1;
   overflow-x: hidden;
   background: var(--chassis-inner);
   padding: 1.25rem 1.5rem 1.5rem;
-  /* Border-radius set per-module via inline style (perimeter corners only). */
+  /* Border-radius and border (black line) set per-module via inline style. */
   border: none;
-  box-shadow: none;
 }
 
 /* ── Header ── */
@@ -882,14 +890,33 @@ body {
   color: var(--text-label);
 }
 
-/* ── Volume widget ── */
+/* ── Volume widget (turntable layout: same size as Pomodoro card) ── */
 .volume-widget {
-  min-width: 200px;
+  width: 100%;
   position: relative;
 }
 
 .volume-widget .header {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+/* Turntable widget: single square base matching reference */
+.turntable-widget {
+  width: 100%;
+}
+
+.turntable-widget-base {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  max-width: 100%;
+  background: linear-gradient(145deg, #f5f3f0 0%, #e8e4df 45%, #ddd8d2 100%);
+  border-radius: 18px;
+  box-shadow:
+    inset 0 2px 6px rgba(255, 255, 255, 0.85),
+    inset 0 -2px 4px rgba(0, 0, 0, 0.08),
+    0 6px 12px rgba(0, 0, 0, 0.15),
+    0 12px 28px rgba(0, 0, 0, 0.25);
 }
 
 .volume-widget .header-title {
@@ -897,26 +924,20 @@ body {
   letter-spacing: 0.18em;
 }
 
-.volume-knob-wrap {
+/* Volume knob: bottom-left of turntable base (no labels) */
+.turntable-knob-wrap {
+  position: absolute;
+  bottom: 8%;
+  left: 8%;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.75rem;
-  margin-bottom: 0.5rem;
-  position: relative;
-}
-
-.volume-knob-label {
-  font-family: var(--font-mono);
-  font-size: 1rem;
-  color: var(--text-label);
-  user-select: none;
 }
 
 .volume-knob {
   position: relative;
-  width: 88px;
-  height: 88px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   cursor: grab;
   flex-shrink: 0;
@@ -968,5 +989,390 @@ body {
   border-radius: 2px;
   pointer-events: none;
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Hidden YouTube IFrame player (controlled via API) */
+.youtube-player-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* ── Volume widget: Music section + 3D vinyl ── */
+.volume-widget-music {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(0, 0, 0, 0.15);
+}
+
+/* Vinyl: centered in turntable base, large with grooves + glossy highlight */
+.turntable-vinyl-wrap {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 58%;
+  max-width: 220px;
+  aspect-ratio: 1;
+}
+
+.vinyl-disc {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+      circle at 50% 50%,
+      #1a1a1a 0%,
+      #0d0d0d 35%,
+      #050505 100%
+    ),
+    repeating-radial-gradient(
+      circle at 50% 50%,
+      transparent 0px,
+      transparent 2px,
+      rgba(0, 0, 0, 0.2) 2px,
+      rgba(0, 0, 0, 0.2) 3px
+    );
+  box-shadow:
+    inset 0 2px 8px rgba(255, 255, 255, 0.1),
+    inset 0 -2px 10px rgba(0, 0, 0, 0.7),
+    0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
+/* Glossy specular highlight on left side (vinyl sheen) */
+.vinyl-disc::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 80% 70% at 30% 45%,
+    rgba(255, 255, 255, 0.25) 0%,
+    rgba(255, 255, 255, 0.06) 35%,
+    transparent 60%
+  );
+}
+
+.vinyl-disc--playing {
+  animation: vinyl-spin 3s linear infinite;
+}
+
+@keyframes vinyl-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.vinyl-grooves {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  background: repeating-radial-gradient(
+    circle at center,
+    transparent 0,
+    transparent 8px,
+    rgba(255, 255, 255, 0.04) 8px,
+    rgba(255, 255, 255, 0.04) 9px
+  );
+}
+
+.vinyl-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 28%;
+  aspect-ratio: 1;
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f0ebe4 0%, #e2dcd4 100%);
+  box-shadow:
+    inset 0 1px 4px rgba(255, 255, 255, 0.7),
+    inset 0 -1px 2px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.vinyl-label-art {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vinyl-label-placeholder {
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  color: var(--text-label);
+  text-transform: uppercase;
+}
+
+/* Tonearm: pivot top-right, curved arm, needle on bottom-right edge of vinyl */
+.turntable-tonearm {
+  position: absolute;
+  top: 5%;
+  right: 5%;
+  width: 32%;
+  max-width: 110px;
+  height: 32%;
+  max-height: 110px;
+  border: 3px solid #e8e4df;
+  border-left: none;
+  border-bottom: none;
+  border-radius: 0 100% 0 0;
+  box-shadow: 2px -2px 6px rgba(0, 0, 0, 0.2);
+  transform: rotate(-22deg);
+  pointer-events: none;
+}
+
+.turntable-tonearm::before {
+  content: '';
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #f2eee8 0%, #e0dad2 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.turntable-tonearm::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: -2px;
+  width: 12px;
+  height: 10px;
+  background: linear-gradient(145deg, #e8e4df 0%, #c8c2bb 100%);
+  border-radius: 2px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+/* Bottom-right: black inset panel with three 3D buttons (Prev | Play/Pause | Next) */
+.turntable-control-panel {
+  position: absolute;
+  bottom: 8%;
+  right: 6%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  background: linear-gradient(180deg, #2a2826 0%, #1a1816 100%);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, 0.6),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.turntable-control-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-label);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(145deg, #e8e6e4 0%, #c4c0bc 50%, #a8a4a0 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.8),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.2),
+    0 2px 3px rgba(0, 0, 0, 0.25);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.turntable-control-btn:hover:not(:disabled) {
+  background: linear-gradient(145deg, #f0eeec 0%, #d0ccc8 50%, #b8b4b0 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.9),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.15),
+    0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.turntable-control-btn:active:not(:disabled) {
+  transform: scale(0.96);
+  box-shadow:
+    inset 0 2px 4px rgba(0, 0, 0, 0.25),
+    0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.turntable-control-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Top-left: small circular "New music" button */
+.turntable-new-music-btn {
+  position: absolute;
+  top: 6%;
+  left: 6%;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: none;
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text-label);
+  cursor: pointer;
+  background: linear-gradient(145deg, #f0ebe4 0%, #e0dad2 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.8),
+    0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.turntable-new-music-btn:hover {
+  background: linear-gradient(145deg, #f5f0e8 0%, #e8e2d8 100%);
+  box-shadow:
+    inset 0 1px 2px rgba(255, 255, 255, 0.9),
+    0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.turntable-new-music-btn:active {
+  transform: scale(0.96);
+}
+
+.volume-widget-track-name {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text);
+  margin: 0.6rem 0 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  padding: 0 2px;
+}
+
+.volume-widget-new-music-link {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  color: var(--text-label);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.volume-widget-new-music-link:hover {
+  color: var(--text);
+}
+
+.turntable-widget .volume-widget-new-music-link {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+/* ── New music modal ── */
+.new-music-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.new-music-modal {
+  background: var(--card-bg);
+  border-radius: var(--radius-card);
+  padding: 1.25rem;
+  max-width: 360px;
+  width: 100%;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.4);
+}
+
+.new-music-modal-title {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}
+
+.new-music-modal-hint {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-label);
+  margin: 0 0 0.75rem;
+}
+
+.new-music-modal-input {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: var(--radius-btn);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.new-music-modal-input:focus {
+  outline: none;
+  border-color: var(--text-label);
+}
+
+.new-music-modal-error {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: #c44;
+  margin: 0 0 0.5rem;
+}
+
+.new-music-modal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 0.75rem;
+}
+
+.new-music-modal-btn {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-btn);
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: transparent;
+  color: var(--text-label);
+  cursor: pointer;
+}
+
+.new-music-modal-btn:hover {
+  color: var(--text);
+  border-color: var(--text-label);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.new-music-modal-btn--primary {
+  background: var(--text-label);
+  color: var(--card-bg);
+  border-color: var(--text-label);
+}
+
+.new-music-modal-btn--primary:hover {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--card-bg);
 }
 

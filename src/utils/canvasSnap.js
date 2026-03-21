@@ -6,7 +6,7 @@
 
 export const GRID_SIZE = 24;
 /** When a module is within this many px of another's edge, it snaps (attaches) to that edge */
-export const SNAP_THRESHOLD = 28;
+export const SNAP_THRESHOLD = 36;
 /** Gap between modules when snapped: 0 = flush (one surface), 2 = minimal seam */
 export const WIDGET_GAP = 0;
 
@@ -98,5 +98,61 @@ export function getSnappedPosition(pos, size, otherWidgets) {
     }
   }
 
+  return best;
+}
+
+const ADJACENCY_TOLERANCE = 4;
+
+/**
+ * Returns whether a widget at position pos with size is edge-touching (within tolerance) any of otherWidgets.
+ *
+ * @param {{ x: number, y: number }} pos - center of the widget
+ * @param {{ width: number, height: number }} size - size of the widget
+ * @param {{ x: number, y: number, width: number, height: number }[]} otherWidgets - other widgets (center + size)
+ */
+export function isAdjacentToAny(pos, size, otherWidgets) {
+  const hw = size.width / 2;
+  const hh = size.height / 2;
+  const left = pos.x - hw;
+  const right = pos.x + hw;
+  const top = pos.y - hh;
+  const bottom = pos.y + hh;
+  const T = ADJACENCY_TOLERANCE;
+  return otherWidgets.some((o) => {
+    const ohw = o.width / 2;
+    const ohh = o.height / 2;
+    const oL = o.x - ohw;
+    const oR = o.x + ohw;
+    const oT = o.y - ohh;
+    const oB = o.y + ohh;
+    return (
+      (Math.abs(right - oL) <= T && top < oB && bottom > oT) ||
+      (Math.abs(left - oR) <= T && top < oB && bottom > oT) ||
+      (Math.abs(bottom - oT) <= T && left < oR && right > oL) ||
+      (Math.abs(top - oB) <= T && left < oR && right > oL)
+    );
+  });
+}
+
+/**
+ * Returns the nearest position that attaches this widget to at least one other (widget-only snap, no grid).
+ *
+ * @param {{ x: number, y: number }} pos - current center of the widget
+ * @param {{ width: number, height: number }} size - size of the widget
+ * @param {{ x: number, y: number, width: number, height: number }[]} otherWidgets - other widgets (center + size)
+ * @returns {{ x: number, y: number }} - nearest widget-attach position
+ */
+export function getNearestWidgetSnapPosition(pos, size, otherWidgets) {
+  const candidates = getWidgetSnapCandidates(pos, size, otherWidgets);
+  if (candidates.length === 0) return pos;
+  let best = candidates[0];
+  let bestDist = Math.hypot(best.x - pos.x, best.y - pos.y);
+  for (const c of candidates) {
+    const d = Math.hypot(c.x - pos.x, c.y - pos.y);
+    if (d < bestDist) {
+      bestDist = d;
+      best = c;
+    }
+  }
   return best;
 }

@@ -7,7 +7,29 @@ import Controls from './components/Controls';
 import Todo from './components/Todo';
 import VolumeWidget from './components/VolumeWidget';
 import useBackgroundSound from './hooks/useBackgroundSound';
-import { getSnappedPosition } from './utils/canvasSnap';
+import useYouTubePlayer from './hooks/useYouTubePlayer';
+import { getSnappedPosition, isAdjacentToAny, getNearestWidgetSnapPosition } from './utils/canvasSnap';
+
+const MUSIC_STORAGE_KEY = 'pomodoro-music';
+function loadMusicState() {
+  try {
+    const saved = localStorage.getItem(MUSIC_STORAGE_KEY);
+    if (saved) {
+      const { queue, currentIndex, isPlaying } = JSON.parse(saved);
+      if (Array.isArray(queue) && typeof currentIndex === 'number' && typeof isPlaying === 'boolean') {
+        return {
+          queue,
+          currentIndex: Math.max(0, Math.min(currentIndex, queue.length - 1)),
+          isPlaying,
+        };
+      }
+    }
+  } catch (_) {}
+  return { queue: [], currentIndex: 0, isPlaying: false };
+}
+function initialMusicState() {
+  return { ...loadMusicState(), newMusicModalOpen: false };
+}
 
 function formatTime(seconds) {
   const m = Math.floor(seconds / 60);
@@ -130,6 +152,33 @@ function App() {
     return defaultRight;
   });
 
+  const [musicState, setMusicState] = useState(initialMusicState);
+  const { queue: musicQueue, currentIndex: musicCurrentIndex, isPlaying: musicIsPlaying } = musicState;
+  const setMusicQueue = (updater) => {
+    setMusicState((prev) => ({ ...prev, queue: typeof updater === 'function' ? updater(prev.queue) : updater }));
+  };
+  const setMusicCurrentIndex = (updater) => {
+    setMusicState((prev) => ({
+      ...prev,
+      currentIndex: typeof updater === 'function' ? updater(prev.currentIndex) : updater,
+    }));
+  };
+  const setMusicIsPlaying = (updater) => {
+    setMusicState((prev) => ({
+      ...prev,
+      isPlaying: typeof updater === 'function' ? updater(prev.isPlaying) : updater,
+    }));
+  };
+
+  const youtubePlayer = useYouTubePlayer(
+    musicQueue,
+    musicCurrentIndex,
+    musicIsPlaying,
+    setMusicQueue,
+    setMusicCurrentIndex,
+    setMusicIsPlaying
+  );
+
   const cardWrapperRef = useRef(null);
   const todoWrapperRef = useRef(null);
   const volumeWrapperRef = useRef(null);
@@ -138,8 +187,11 @@ function App() {
   const [consoleBounds, setConsoleBounds] = useState(null);
   /** For each module: which corners lie on the console perimeter (get rounded); inner junctions stay sharp. */
   const [perimeterCorners, setPerimeterCorners] = useState([]);
+  /** For each module: whether it has a widget snapped to its right or bottom (draw black groove line). */
+  const [adjacentEdges, setAdjacentEdges] = useState(() => [{ right: false, bottom: false }, { right: false, bottom: false }, { right: false, bottom: false }]);
   const CONSOLE_PADDING = 20;
   const RADIUS_CARD = 18;
+  const TOUCH_TOLERANCE = 4; /* px: consider widgets "snapped" for the black line */
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
@@ -168,6 +220,26 @@ function App() {
         bottomRight: r.bottom >= cBottom - tolerance && r.right >= cRight - tolerance,
       }));
       setPerimeterCorners(corners);
+
+      /* Adjacency: widget i has a right neighbor if some widget's left edge touches our right (within TOUCH_TOLERANCE) and overlaps vertically */
+      const edges = rects.map((r, i) => {
+        const hasRight = rects.some(
+          (o, j) =>
+            j !== i &&
+            Math.abs(o.left - r.right) <= TOUCH_TOLERANCE &&
+            o.top < r.bottom &&
+            o.bottom > r.top
+        );
+        const hasBottom = rects.some(
+          (o, j) =>
+            j !== i &&
+            Math.abs(o.top - r.bottom) <= TOUCH_TOLERANCE &&
+            o.left < r.right &&
+            o.right > r.left
+        );
+        return { right: hasRight, bottom: hasBottom };
+      });
+      setAdjacentEdges(edges);
     });
     return () => cancelAnimationFrame(raf);
   }, [cardPosition, todoPosition, volumeWidgetPosition]);
@@ -226,7 +298,10 @@ function App() {
           };
         });
       const snapped = getSnappedPosition(currentPos, size, otherWidgets);
-      mod.setPosition(clampPosition(snapped));
+      const finalPos = isAdjacentToAny(snapped, size, otherWidgets)
+        ? snapped
+        : getNearestWidgetSnapPosition(currentPos, size, otherWidgets);
+      mod.setPosition(clampPosition(finalPos));
     };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
@@ -257,6 +332,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem('pomodoro-volume-widget-position', JSON.stringify(volumeWidgetPosition));
   }, [volumeWidgetPosition]);
+  useEffect(() => {
+    localStorage.setItem(
+      MUSIC_STORAGE_KEY,
+      JSON.stringify({
+        queue: musicQueue,
+        currentIndex: musicCurrentIndex,
+        isPlaying: musicIsPlaying,
+      })
+    );
+  }, [musicQueue, musicCurrentIndex, musicIsPlaying]);
 
   useBackgroundSound(selectedSound, isRunning, volume);
 
@@ -354,16 +439,18 @@ function App() {
     setTodoItems((prev) => prev.filter((item) => !(item.type === 'task' && item.completed)));
   };
 
-  /** Border radius only on corners that lie on the console perimeter; inner junctions stay sharp (OP-1 style). */
+  /** Corner radius on every widget; black groove line only on edges where another widget is snapped. */
   const getModuleCardStyle = (index) => {
-    const c = perimeterCorners[index];
-    if (!c) return {};
-    return {
-      borderTopLeftRadius: c.topLeft ? RADIUS_CARD : 0,
-      borderTopRightRadius: c.topRight ? RADIUS_CARD : 0,
-      borderBottomLeftRadius: c.bottomLeft ? RADIUS_CARD : 0,
-      borderBottomRightRadius: c.bottomRight ? RADIUS_CARD : 0,
+    const edge = adjacentEdges[index];
+    const style = {
+      borderTopLeftRadius: RADIUS_CARD,
+      borderTopRightRadius: RADIUS_CARD,
+      borderBottomLeftRadius: RADIUS_CARD,
+      borderBottomRightRadius: RADIUS_CARD,
     };
+    if (edge?.right) style.borderRight = '2px solid #0d0d0d';
+    if (edge?.bottom) style.borderBottom = '2px solid #0d0d0d';
+    return style;
   };
 
   return (
@@ -393,25 +480,31 @@ function App() {
           zIndex: 10,
         }}
       >
-        <div className="card" style={getModuleCardStyle(0)}>
-          <Header onDragHandleMouseDown={handleDragStart} />
-          <TimerBlock
-            timeLeft={formatTime(timeLeft)}
-            mode={mode}
-          />
-          <SoundPills selectedSound={selectedSound} onSelect={setSelectedSound} />
-          <Controls
-            isRunning={isRunning}
-            onStart={() => setIsRunning((r) => !r)}
-            onReset={handleReset}
-            onSkip={handleSkip}
-            focusMinutes={focusMinutes}
-            onFocusMinutesChange={(delta) => setFocusMinutes((m) => Math.max(5, Math.min(60, m + delta)))}
-            breakMinutes={breakMinutes}
-            onBreakMinutesChange={(delta) => setBreakMinutes((m) => Math.max(1, Math.min(15, m + delta)))}
-          />
-          <div className="card-footer">
-            <span className="card-version">PC-25</span>
+        <div className="card card--tv" style={getModuleCardStyle(0)}>
+          <div className="tv-screen-section">
+            <Header onDragHandleMouseDown={handleDragStart} />
+            <div className="tv-bezel">
+              <TimerBlock
+                timeLeft={formatTime(timeLeft)}
+                mode={mode}
+              />
+            </div>
+          </div>
+          <div className="controls-hw-panel">
+            <SoundPills selectedSound={selectedSound} onSelect={setSelectedSound} />
+            <Controls
+              isRunning={isRunning}
+              onStart={() => setIsRunning((r) => !r)}
+              onReset={handleReset}
+              onSkip={handleSkip}
+              focusMinutes={focusMinutes}
+              onFocusMinutesChange={(delta) => setFocusMinutes((m) => Math.max(5, Math.min(60, m + delta)))}
+              breakMinutes={breakMinutes}
+              onBreakMinutesChange={(delta) => setBreakMinutes((m) => Math.max(1, Math.min(15, m + delta)))}
+            />
+            <div className="card-footer">
+              <span className="card-version">PC-25</span>
+            </div>
           </div>
         </div>
       </div>
@@ -450,10 +543,28 @@ function App() {
         }}
       >
         <div className="card" style={getModuleCardStyle(2)}>
+          <div ref={youtubePlayer.playerContainerRef} className="youtube-player-hidden" aria-hidden />
           <VolumeWidget
             volume={volume}
             onVolumeChange={setVolume}
             onDragHandleMouseDown={handleVolumeWidgetDragStart}
+            musicIsPlaying={musicIsPlaying}
+            musicCurrentTitle={youtubePlayer.currentTitle}
+            musicCurrentThumbnail={youtubePlayer.currentThumbnail}
+            musicHasTrack={youtubePlayer.hasTrack}
+            onMusicPlay={youtubePlayer.play}
+            onMusicPause={youtubePlayer.pause}
+            onMusicPrev={youtubePlayer.prev}
+            onMusicNext={youtubePlayer.next}
+            onOpenNewMusic={(open) => setMusicState((prev) => ({ ...prev, newMusicModalOpen: open }))}
+            newMusicModalOpen={musicState.newMusicModalOpen}
+            onAddToQueue={(videoIds) => {
+              setMusicQueue((q) => [...q, ...videoIds]);
+              if (musicQueue.length === 0 && videoIds.length > 0) {
+                setMusicCurrentIndex(0);
+                setMusicIsPlaying(true);
+              }
+            }}
           />
         </div>
       </div>
