@@ -1,10 +1,19 @@
 import { useRef, useCallback } from 'react';
-import NewMusicModal from './NewMusicModal';
+import {
+  MAC_OUTPUT_VOLUME_STEPS,
+  knobRotationCssDeg,
+  tickPositionOnArc,
+  volumeStepIndex,
+  pointerAngleCwFromTopDeg,
+  stepIndexFromPointerAngleCwFromTop,
+} from '../utils/volumeSteps';
 
-const NUM_STEPS = 28;
-const MIN_ANGLE = -90;
-const MAX_ANGLE = 90;
-const PIXELS_PER_STEP = 10;
+/**
+ * Step dots on the top arc only (225° → CW → 135°), outside the knob.
+ * ViewBox units match px: knob Ø112 → r≈56. Radius nudged outward for a bit more gap from the dial edge.
+ */
+const TICK_DOT_RADIUS = 72;
+const TICK_DOT_R = 1.25;
 
 function playTickSound(ctxRef) {
   try {
@@ -23,55 +32,52 @@ function playTickSound(ctxRef) {
     gain.connect(ctx.destination);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.03);
-  } catch (_) {}
+  } catch {
+    /* optional tick */
+  }
 }
 
-function VolumeWidget({
-  volume,
-  onVolumeChange,
-  onDragHandleMouseDown,
-  musicIsPlaying = false,
-  musicCurrentTitle = '',
-  musicCurrentThumbnail = null,
-  musicHasTrack = false,
-  onMusicPlay,
-  onMusicPause,
-  onMusicPrev,
-  onMusicNext,
-  onOpenNewMusic,
-  newMusicModalOpen = false,
-  onAddToQueue,
-}) {
+function VolumeWidget({ volume, onVolumeChange, onDragHandleMouseDown }) {
   const tickCtxRef = useRef(null);
-  const knobRef = useRef(null);
-  const dragRef = useRef({ startX: 0, startStepIndex: 0, lastStepIndex: -1 });
+  const wrapRef = useRef(null);
+  const dragRef = useRef({ lastStepIndex: -1 });
 
-  const stepIndex = Math.round(volume * (NUM_STEPS - 1));
-  const rotation = MIN_ANGLE + (volume * (MAX_ANGLE - MIN_ANGLE));
+  const n = MAC_OUTPUT_VOLUME_STEPS - 1;
+  const stepIndex = volumeStepIndex(volume);
+  const knobRotation = knobRotationCssDeg(stepIndex);
 
   const playTick = useCallback(() => {
     playTickSound(tickCtxRef);
   }, []);
 
-  const handleKnobMouseDown = (e) => {
-    e.preventDefault();
-    if (e.button !== 0) return;
-    dragRef.current = {
-      startX: e.clientX,
-      startStepIndex: stepIndex,
-      lastStepIndex: stepIndex,
-    };
-    const onMove = (eMove) => {
-      const deltaX = eMove.clientX - dragRef.current.startX;
-      const stepDelta = Math.round(deltaX / PIXELS_PER_STEP);
-      let newStep = dragRef.current.startStepIndex + stepDelta;
-      newStep = Math.max(0, Math.min(NUM_STEPS - 1, newStep));
-      const newVolume = newStep / (NUM_STEPS - 1);
+  const applyStepFromClient = useCallback(
+    (clientX, clientY) => {
+      const el = wrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const u = pointerAngleCwFromTopDeg(clientX, clientY, cx, cy);
+      const newStep = stepIndexFromPointerAngleCwFromTop(u);
+      const newVolume = newStep / n;
       if (newStep !== dragRef.current.lastStepIndex) {
         dragRef.current.lastStepIndex = newStep;
         playTick();
       }
       onVolumeChange(newVolume);
+    },
+    [n, onVolumeChange, playTick]
+  );
+
+  const handleVolumePointerDown = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    dragRef.current.lastStepIndex = stepIndex;
+    applyStepFromClient(e.clientX, e.clientY);
+
+    const onMove = (eMove) => {
+      applyStepFromClient(eMove.clientX, eMove.clientY);
     };
     const onUp = () => {
       window.removeEventListener('mousemove', onMove);
@@ -80,6 +86,23 @@ function VolumeWidget({
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
+
+  const stepDots = Array.from({ length: MAC_OUTPUT_VOLUME_STEPS }, (_, i) => {
+    const p = tickPositionOnArc(i, TICK_DOT_RADIUS);
+    return (
+      <circle
+        key={i}
+        cx={p.x}
+        cy={p.y}
+        r={TICK_DOT_R}
+        className={
+          i <= stepIndex
+            ? 'volume-knob-step-dot volume-knob-step-dot--filled'
+            : 'volume-knob-step-dot'
+        }
+      />
+    );
+  });
 
   return (
     <div className="volume-widget">
@@ -105,112 +128,52 @@ function VolumeWidget({
           <span className="grid-dot" />
         </button>
       </header>
-      <section className="turntable-widget" aria-label="Music player">
-        <div className="turntable-widget-base">
-          <div className="turntable-vinyl-wrap">
-            <div className={`vinyl-disc ${musicIsPlaying ? 'vinyl-disc--playing' : ''}`}>
-              <div className="vinyl-grooves" />
-              <div className="vinyl-label">
-                {musicCurrentThumbnail ? (
-                  <img src={musicCurrentThumbnail} alt="" className="vinyl-label-art" />
-                ) : (
-                  <span className="vinyl-label-placeholder">Album</span>
-                )}
-              </div>
+
+      <div className="volume-widget-knob-panel">
+        <div className="volume-widget-knob-inner">
+          <div
+            ref={wrapRef}
+            className="volume-knob-with-steps"
+            onMouseDown={handleVolumePointerDown}
+          >
+            <svg
+              className="volume-knob-step-ring"
+              viewBox="-78 -78 156 156"
+              aria-hidden
+            >
+              {stepDots}
+            </svg>
+            <div
+              className="volume-knob-rotate-wrap"
+              style={{ transform: `rotate(${knobRotation}deg)` }}
+            >
+              <div
+                className="audio-player-volume-knob"
+                role="slider"
+                aria-label="Volume"
+                aria-valuemin={0}
+                aria-valuemax={n}
+                aria-valuenow={stepIndex}
+                aria-valuetext={`${stepIndex + 1} of ${MAC_OUTPUT_VOLUME_STEPS}`}
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    const newStep = Math.min(n, stepIndex + 1);
+                    playTick();
+                    onVolumeChange(newStep / n);
+                  } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    const newStep = Math.max(0, stepIndex - 1);
+                    playTick();
+                    onVolumeChange(newStep / n);
+                  }
+                }}
+              />
             </div>
           </div>
-          <div className="turntable-tonearm" aria-hidden />
-
-          <div className="turntable-knob-wrap">
-            <div
-              ref={knobRef}
-              className="volume-knob"
-              role="slider"
-              aria-label="Volume"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(volume * 100)}
-              tabIndex={0}
-              style={{ transform: `rotate(${rotation}deg)` }}
-              onMouseDown={handleKnobMouseDown}
-              onKeyDown={(e) => {
-                if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-                  e.preventDefault();
-                  const newStep = Math.min(NUM_STEPS - 1, stepIndex + 1);
-                  playTick();
-                  onVolumeChange(newStep / (NUM_STEPS - 1));
-                } else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-                  e.preventDefault();
-                  const newStep = Math.max(0, stepIndex - 1);
-                  playTick();
-                  onVolumeChange(newStep / (NUM_STEPS - 1));
-                }
-              }}
-            />
-          </div>
-
-          <div className="turntable-control-panel">
-            <button
-              type="button"
-              className="turntable-control-btn"
-              aria-label="Previous track"
-              onClick={onMusicPrev}
-              disabled={!musicHasTrack}
-            >
-              ‹‹
-            </button>
-            <button
-              type="button"
-              className="turntable-control-btn"
-              aria-label={musicIsPlaying ? 'Pause' : 'Play'}
-              onClick={musicIsPlaying ? onMusicPause : onMusicPlay}
-              disabled={!musicHasTrack}
-            >
-              {musicIsPlaying ? '‖' : '▶'}
-            </button>
-            <button
-              type="button"
-              className="turntable-control-btn"
-              aria-label="Next track"
-              onClick={onMusicNext}
-              disabled={!musicHasTrack}
-            >
-              ››
-            </button>
-          </div>
-
-          {onOpenNewMusic && (
-            <button
-              type="button"
-              className="turntable-new-music-btn"
-              aria-label="New music"
-              onClick={() => onOpenNewMusic(true)}
-            >
-              +
-            </button>
-          )}
         </div>
-
-        <p className="volume-widget-track-name" title={musicCurrentTitle}>
-          {musicHasTrack ? musicCurrentTitle || 'Loading…' : 'No track'}
-        </p>
-        {onOpenNewMusic && (
-          <button
-            type="button"
-            className="volume-widget-new-music-link"
-            onClick={() => onOpenNewMusic(true)}
-          >
-            New music
-          </button>
-        )}
-      </section>
-
-      {newMusicModalOpen && onOpenNewMusic && onAddToQueue && (
-        <NewMusicModal
-          onClose={() => onOpenNewMusic(false)}
-          onAddToQueue={onAddToQueue}
-        />
-      )}
+      </div>
     </div>
   );
 }
