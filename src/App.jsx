@@ -1,16 +1,37 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import './App.css';
 import Header from './components/Header';
 import TimerBlock from './components/TimerBlock';
 import SoundPills from './components/SoundPills';
 import Controls from './components/Controls';
 import Todo from './components/Todo';
+import AudioPlayerWidget from './components/AudioPlayerWidget';
 import VolumeWidget from './components/VolumeWidget';
+import QuoteTvWidget from './components/QuoteTvWidget';
 import useBackgroundSound from './hooks/useBackgroundSound';
 import useYouTubePlayer from './hooks/useYouTubePlayer';
 import { getSnappedPosition, isAdjacentToAny, getNearestWidgetSnapPosition } from './utils/canvasSnap';
+import { pullMacOsOutputVolume, pushMacOsOutputVolume } from './utils/macosSystemVolume';
+import { snapVolumeToSteps } from './utils/volumeSteps';
 
 const MUSIC_STORAGE_KEY = 'pomodoro-music';
+const AUDIO_PLAYER_WIDGET_POSITION_KEY = 'pomodoro-audio-player-widget-position';
+const VOLUME_WIDGET_POSITION_KEY = 'pomodoro-volume-module-position';
+const LEGACY_VOLUME_WIDGET_POSITION_KEY = 'pomodoro-volume-widget-position';
+const QUOTE_WIDGET_POSITION_KEY = 'pomodoro-quote-widget-position';
+
+/** Active items and notes first, then completed tasks (matches list UI). */
+function normalizeTodoItemsForCompletedSection(items) {
+  if (!Array.isArray(items)) return [];
+  const active = [];
+  const done = [];
+  for (const item of items) {
+    if (item?.type === 'task' && item.completed) done.push(item);
+    else active.push(item);
+  }
+  return [...active, ...done];
+}
+
 function loadMusicState() {
   try {
     const saved = localStorage.getItem(MUSIC_STORAGE_KEY);
@@ -28,7 +49,7 @@ function loadMusicState() {
   return { queue: [], currentIndex: 0, isPlaying: false };
 }
 function initialMusicState() {
-  return { ...loadMusicState(), newMusicModalOpen: false };
+  return loadMusicState();
 }
 
 function formatTime(seconds) {
@@ -68,9 +89,9 @@ function App() {
     const saved = localStorage.getItem('pomodoro-volume');
     if (saved != null) {
       const v = parseFloat(saved);
-      if (!isNaN(v) && v >= 0 && v <= 1) return v;
+      if (!isNaN(v) && v >= 0 && v <= 1) return snapVolumeToSteps(v);
     }
-    return 1;
+    return snapVolumeToSteps(1);
   });
 
   const [sessionCount, setSessionCount] = useState(0);
@@ -80,7 +101,7 @@ function App() {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) return parsed;
+        if (Array.isArray(parsed)) return normalizeTodoItemsForCompletedSection(parsed);
       } catch (_) {}
     }
     return [];
@@ -131,8 +152,10 @@ function App() {
     return { x: 0, y: 0 };
   });
 
-  const [volumeWidgetPosition, setVolumeWidgetPosition] = useState(() => {
-    const saved = localStorage.getItem('pomodoro-volume-widget-position');
+  const [audioPlayerWidgetPosition, setAudioPlayerWidgetPosition] = useState(() => {
+    const saved =
+      localStorage.getItem(AUDIO_PLAYER_WIDGET_POSITION_KEY) ??
+      localStorage.getItem(LEGACY_VOLUME_WIDGET_POSITION_KEY);
     const defaultRight = { x: 420, y: 0 };
     if (saved) {
       try {
@@ -150,6 +173,48 @@ function App() {
       } catch (_) {}
     }
     return defaultRight;
+  });
+
+  const [volumeWidgetPosition, setVolumeWidgetPosition] = useState(() => {
+    const saved = localStorage.getItem(VOLUME_WIDGET_POSITION_KEY);
+    const defaultCorner = { x: 420, y: 380 };
+    if (saved) {
+      try {
+        const { x, y } = JSON.parse(saved);
+        if (typeof x === 'number' && typeof y === 'number') {
+          const w = typeof window !== 'undefined' ? window.innerWidth : 800;
+          const h = typeof window !== 'undefined' ? window.innerHeight : 600;
+          const maxX = Math.max(0, w / 2 - 100);
+          const maxY = Math.max(0, h / 2 - 100);
+          return {
+            x: Math.max(-maxX, Math.min(maxX, x)),
+            y: Math.max(-maxY, Math.min(maxY, y)),
+          };
+        }
+      } catch (_) {}
+    }
+    return defaultCorner;
+  });
+
+  const [quoteWidgetPosition, setQuoteWidgetPosition] = useState(() => {
+    const saved = localStorage.getItem(QUOTE_WIDGET_POSITION_KEY);
+    const defaultLeft = { x: -440, y: -20 };
+    if (saved) {
+      try {
+        const { x, y } = JSON.parse(saved);
+        if (typeof x === 'number' && typeof y === 'number') {
+          const w = typeof window !== 'undefined' ? window.innerWidth : 800;
+          const h = typeof window !== 'undefined' ? window.innerHeight : 600;
+          const maxX = Math.max(0, w / 2 - 100);
+          const maxY = Math.max(0, h / 2 - 100);
+          return {
+            x: Math.max(-maxX, Math.min(maxX, x)),
+            y: Math.max(-maxY, Math.min(maxY, y)),
+          };
+        }
+      } catch (_) {}
+    }
+    return defaultLeft;
   });
 
   const [musicState, setMusicState] = useState(initialMusicState);
@@ -181,21 +246,30 @@ function App() {
 
   const cardWrapperRef = useRef(null);
   const todoWrapperRef = useRef(null);
+  const audioPlayerWrapperRef = useRef(null);
   const volumeWrapperRef = useRef(null);
+  const quoteWrapperRef = useRef(null);
+  const volumeCardRef = useRef(null);
 
   /** Console: union of all module rects + padding. When modules snap together, one chassis wraps them. */
   const [consoleBounds, setConsoleBounds] = useState(null);
   /** For each module: which corners lie on the console perimeter (get rounded); inner junctions stay sharp. */
   const [perimeterCorners, setPerimeterCorners] = useState([]);
   /** For each module: whether it has a widget snapped to its right or bottom (draw black groove line). */
-  const [adjacentEdges, setAdjacentEdges] = useState(() => [{ right: false, bottom: false }, { right: false, bottom: false }, { right: false, bottom: false }]);
+  const [adjacentEdges, setAdjacentEdges] = useState(() => [
+    { right: false, bottom: false },
+    { right: false, bottom: false },
+    { right: false, bottom: false },
+    { right: false, bottom: false },
+    { right: false, bottom: false },
+  ]);
   const CONSOLE_PADDING = 20;
   const RADIUS_CARD = 18;
   const TOUCH_TOLERANCE = 4; /* px: consider widgets "snapped" for the black line */
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => {
-      const refs = [cardWrapperRef, todoWrapperRef, volumeWrapperRef];
+      const refs = [cardWrapperRef, todoWrapperRef, audioPlayerWrapperRef, volumeWrapperRef, quoteWrapperRef];
       const rects = refs.map((r) => r.current?.getBoundingClientRect()).filter(Boolean);
       if (rects.length === 0) return;
       const left = Math.min(...rects.map((r) => r.left));
@@ -242,7 +316,29 @@ function App() {
       setAdjacentEdges(edges);
     });
     return () => cancelAnimationFrame(raf);
-  }, [cardPosition, todoPosition, volumeWidgetPosition]);
+  }, [cardPosition, todoPosition, audioPlayerWidgetPosition, volumeWidgetPosition, quoteWidgetPosition]);
+
+  useEffect(() => {
+    const todoWrap = todoWrapperRef.current;
+    const volWrap = volumeWrapperRef.current;
+    if (!todoWrap || !volWrap) return;
+    const sync = () => {
+      const volCard = volumeCardRef.current;
+      const h = Math.round(todoWrap.getBoundingClientRect().height);
+      const maxW = Math.round(volWrap.getBoundingClientRect().width) || 380;
+      if (h > 0 && volCard) {
+        const side = Math.max(200, Math.min(h, maxW));
+        volCard.style.minHeight = `${side}px`;
+        volCard.style.height = `${side}px`;
+        volCard.style.width = `${side}px`;
+      }
+    };
+    sync();
+    const ro = new ResizeObserver(sync);
+    ro.observe(todoWrap);
+    ro.observe(volWrap);
+    return () => ro.disconnect();
+  }, [todoItems]);
 
   /** Clamp position so widget center stays within a reasonable range of viewport center */
   const clampPosition = (pos, margin = 120) => {
@@ -264,7 +360,9 @@ function App() {
   const consoleModules = [
     { ref: cardWrapperRef, position: cardPosition, setPosition: setCardPosition },
     { ref: todoWrapperRef, position: todoPosition, setPosition: setTodoPosition },
+    { ref: audioPlayerWrapperRef, position: audioPlayerWidgetPosition, setPosition: setAudioPlayerWidgetPosition },
     { ref: volumeWrapperRef, position: volumeWidgetPosition, setPosition: setVolumeWidgetPosition },
+    { ref: quoteWrapperRef, position: quoteWidgetPosition, setPosition: setQuoteWidgetPosition },
   ];
 
   const createDragHandler = (index) => (clientX, clientY) => {
@@ -330,8 +428,14 @@ function App() {
     localStorage.setItem('pomodoro-volume', String(Math.max(0, Math.min(1, volume))));
   }, [volume]);
   useEffect(() => {
-    localStorage.setItem('pomodoro-volume-widget-position', JSON.stringify(volumeWidgetPosition));
+    localStorage.setItem(AUDIO_PLAYER_WIDGET_POSITION_KEY, JSON.stringify(audioPlayerWidgetPosition));
+  }, [audioPlayerWidgetPosition]);
+  useEffect(() => {
+    localStorage.setItem(VOLUME_WIDGET_POSITION_KEY, JSON.stringify(volumeWidgetPosition));
   }, [volumeWidgetPosition]);
+  useEffect(() => {
+    localStorage.setItem(QUOTE_WIDGET_POSITION_KEY, JSON.stringify(quoteWidgetPosition));
+  }, [quoteWidgetPosition]);
   useEffect(() => {
     localStorage.setItem(
       MUSIC_STORAGE_KEY,
@@ -344,6 +448,17 @@ function App() {
   }, [musicQueue, musicCurrentIndex, musicIsPlaying]);
 
   useBackgroundSound(selectedSound, isRunning, volume);
+
+  useEffect(() => {
+    let cancelled = false;
+    pullMacOsOutputVolume().then((sys) => {
+      if (cancelled || sys == null) return;
+      setVolume(snapVolumeToSteps(sys));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Sync timeLeft only when user changes focus/break duration or mode (not when pausing)
   useEffect(() => {
@@ -415,7 +530,15 @@ function App() {
 
   const handleDragStart = createDragHandler(0);
   const handleTodoDragStart = createDragHandler(1);
-  const handleVolumeWidgetDragStart = createDragHandler(2);
+  const handleAudioPlayerWidgetDragStart = createDragHandler(2);
+  const handleVolumeWidgetDragStart = createDragHandler(3);
+  const handleQuoteWidgetDragStart = createDragHandler(4);
+
+  const handleVolumeChange = useCallback((v) => {
+    const next = snapVolumeToSteps(v);
+    setVolume(next);
+    pushMacOsOutputVolume(next);
+  }, []);
 
   const handleAddTask = (text) => {
     setTodoItems((prev) => [...prev, { id: genId(), type: 'task', text, completed: false }]);
@@ -426,13 +549,38 @@ function App() {
   };
 
   const handleTodoToggle = (id) => {
-    setTodoItems((prev) =>
-      prev.map((item) => (item.type === 'task' && item.id === id ? { ...item, completed: !item.completed } : item))
-    );
+    setTodoItems((prev) => {
+      const idx = prev.findIndex((i) => i.id === id);
+      if (idx === -1) return prev;
+      const item = prev[idx];
+      if (item.type !== 'task') return prev;
+      const toggled = { ...item, completed: !item.completed };
+      const rest = prev.filter((i) => i.id !== id);
+      if (!toggled.completed) {
+        const insertAt = rest.findIndex((i) => i.type === 'task' && i.completed);
+        if (insertAt === -1) return [...rest, toggled];
+        return [...rest.slice(0, insertAt), toggled, ...rest.slice(insertAt)];
+      }
+      return [...rest, toggled];
+    });
   };
 
-  const handleTodoDelete = (id) => {
-    setTodoItems((prev) => prev.filter((item) => item.id !== id));
+  const handleTodoReorder = (activeId, overId) => {
+    setTodoItems((prev) => {
+      const from = prev.findIndex((i) => i.id === activeId);
+      const to = prev.findIndex((i) => i.id === overId);
+      if (from === -1 || to === -1 || from === to) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      const active = [];
+      const done = [];
+      for (const item of next) {
+        if (item.type === 'task' && item.completed) done.push(item);
+        else active.push(item);
+      }
+      return [...active, ...done];
+    });
   };
 
   const handleClearCompleted = () => {
@@ -525,39 +673,33 @@ function App() {
             onAddTask={handleAddTask}
             onAddNote={handleAddNote}
             onToggle={handleTodoToggle}
-            onDelete={handleTodoDelete}
+            onReorder={handleTodoReorder}
             onClearCompleted={handleClearCompleted}
             onDragHandleMouseDown={handleTodoDragStart}
           />
         </div>
       </div>
       <div
-        ref={volumeWrapperRef}
+        ref={audioPlayerWrapperRef}
         className="card-wrapper"
         style={{
           position: 'fixed',
           left: '50%',
           top: '50%',
-          transform: `translate(-50%, -50%) translate(${volumeWidgetPosition.x}px, ${volumeWidgetPosition.y}px)`,
+          transform: `translate(-50%, -50%) translate(${audioPlayerWidgetPosition.x}px, ${audioPlayerWidgetPosition.y}px)`,
           zIndex: 10,
         }}
       >
         <div className="card" style={getModuleCardStyle(2)}>
           <div ref={youtubePlayer.playerContainerRef} className="youtube-player-hidden" aria-hidden />
-          <VolumeWidget
-            volume={volume}
-            onVolumeChange={setVolume}
-            onDragHandleMouseDown={handleVolumeWidgetDragStart}
+          <AudioPlayerWidget
+            onDragHandleMouseDown={handleAudioPlayerWidgetDragStart}
             musicIsPlaying={musicIsPlaying}
             musicCurrentTitle={youtubePlayer.currentTitle}
             musicCurrentThumbnail={youtubePlayer.currentThumbnail}
             musicHasTrack={youtubePlayer.hasTrack}
             onMusicPlay={youtubePlayer.play}
             onMusicPause={youtubePlayer.pause}
-            onMusicPrev={youtubePlayer.prev}
-            onMusicNext={youtubePlayer.next}
-            onOpenNewMusic={(open) => setMusicState((prev) => ({ ...prev, newMusicModalOpen: open }))}
-            newMusicModalOpen={musicState.newMusicModalOpen}
             onAddToQueue={(videoIds) => {
               setMusicQueue((q) => [...q, ...videoIds]);
               if (musicQueue.length === 0 && videoIds.length > 0) {
@@ -566,6 +708,40 @@ function App() {
               }
             }}
           />
+        </div>
+      </div>
+      <div
+        ref={volumeWrapperRef}
+        className="card-wrapper card-wrapper--volume-square"
+        style={{
+          position: 'fixed',
+          left: '50%',
+          top: '50%',
+          transform: `translate(-50%, -50%) translate(${volumeWidgetPosition.x}px, ${volumeWidgetPosition.y}px)`,
+          zIndex: 10,
+        }}
+      >
+        <div ref={volumeCardRef} className="card card--volume-module" style={getModuleCardStyle(3)}>
+          <VolumeWidget
+            volume={volume}
+            onVolumeChange={handleVolumeChange}
+            onDragHandleMouseDown={handleVolumeWidgetDragStart}
+          />
+        </div>
+      </div>
+      <div
+        ref={quoteWrapperRef}
+        className="card-wrapper"
+        style={{
+          position: 'fixed',
+          left: '50%',
+          top: '50%',
+          transform: `translate(-50%, -50%) translate(${quoteWidgetPosition.x}px, ${quoteWidgetPosition.y}px)`,
+          zIndex: 10,
+        }}
+      >
+        <div className="card" style={getModuleCardStyle(4)}>
+          <QuoteTvWidget onDragHandleMouseDown={handleQuoteWidgetDragStart} />
         </div>
       </div>
     </div>
